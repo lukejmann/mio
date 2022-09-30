@@ -1,32 +1,10 @@
-# Mio – Metal IO
+# Mio – Metal IO for WebAssembly
 
 Mio is a fast, low-level I/O library for Rust focusing on non-blocking APIs and
 event notification for building high performance I/O apps with as little
 overhead as possible over the OS abstractions.
 
-[![Crates.io][crates-badge]][crates-url]
-[![MIT licensed][mit-badge]][mit-url]
-[![Build Status][actions-badge]][actions-url]
-[![Build Status][cirrus-badge]][cirrus-url]
-
-[crates-badge]: https://img.shields.io/crates/v/mio.svg
-[crates-url]: https://crates.io/crates/mio
-[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[mit-url]: LICENSE
-[actions-badge]: https://github.com/tokio-rs/mio/workflows/CI/badge.svg
-[actions-url]: https://github.com/tokio-rs/mio/actions?query=workflow%3ACI+branch%3Amaster
-[cirrus-badge]: https://api.cirrus-ci.com/github/tokio-rs/mio.svg
-[cirrus-url]: https://cirrus-ci.com/github/tokio-rs/mio
-
-**API documentation**
-
-* [master](https://tokio-rs.github.io/mio/doc/mio/)
-* [v0.8](https://docs.rs/mio/^0.8)
-* [v0.7](https://docs.rs/mio/^0.7)
-* [v0.6](https://docs.rs/mio/^0.6)
-
-This is a low level library, if you are looking for something easier to get
-started with, see [Tokio](https://tokio.rs).
+This crate is a fork from the original [Mio](https://github.com/tokio-rs/mio) library to support compilation into WebAssembly. Once compiled into WebAssembly, Mio applications can run inside the [WasmEdge Runtime](https://github.com/WasmEdge/WasmEdge#readme), which is a lightweight alternative to Linux container apps.
 
 ## Usage
 
@@ -34,7 +12,7 @@ To use `mio`, first add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mio = "0.8"
+mio_wasi = "0.8"
 ```
 
 Next we can start using Mio. The following is quick introduction using
@@ -125,49 +103,6 @@ or higher-level libraries.
 * File operations
 * Thread pools / multi-threaded event loop
 * Timers
-
-## Platforms
-
-Currently supported platforms:
-
-* Android (API level 21)
-* DragonFly BSD
-* FreeBSD
-* Linux
-* NetBSD
-* OpenBSD
-* Windows
-* iOS
-* macOS
-
-There are potentially others. If you find that Mio works on another
-platform, submit a PR to update the list!
-
-Mio can handle interfacing with each of the event systems of the aforementioned
-platforms. The details of their implementation are further discussed in the
-`Poll` type of the API documentation (see above).
-
-The Windows implementation for polling sockets is using the [wepoll] strategy.
-This uses the Windows AFD system to access socket readiness events.
-
-[wepoll]: https://github.com/piscisaureus/wepoll
-
-### Unsupported
-
-* Haiku, see [issue #1472]
-* Solaris, see [issue #1152]
-* Wine, see [issue #1444]
-
-[issue #1472]: https://github.com/tokio-rs/mio/issues/1472
-[issue #1152]: https://github.com/tokio-rs/mio/issues/1152
-[issue #1444]: https://github.com/tokio-rs/mio/issues/1444
-
-## Community
-
-A group of Mio users hang out on [Discord], this can be a good place to go for
-questions.
-
-[Discord]: https://discord.gg/tokio
 
 ## Contributing
 
