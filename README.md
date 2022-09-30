@@ -4,7 +4,7 @@ Mio is a fast, low-level I/O library for Rust focusing on non-blocking APIs and
 event notification for building high performance I/O apps with as little
 overhead as possible over the OS abstractions.
 
-This crate is a fork from the original [Mio](https://github.com/tokio-rs/mio) library to support compilation into WebAssembly. Once compiled into WebAssembly, Mio applications can run inside the [WasmEdge Runtime](https://github.com/WasmEdge/WasmEdge#readme), which is a lightweight alternative to Linux container apps.
+This crate is a fork from the original [Mio](https://github.com/tokio-rs/mio) library to support compilation into WebAssembly. The WebAssembly app can run inside the [WasmEdge Runtime](https://github.com/WasmEdge/WasmEdge#readme) as a lightweight and secure alternative to natively compiled apps in Linux container.
 
 ## Usage
 
