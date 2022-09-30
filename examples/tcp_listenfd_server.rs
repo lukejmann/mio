@@ -4,9 +4,9 @@
 // cargo +nightly build --target wasm32-wasi  --example tcp_listenfd_server --features="os-poll net"
 // wasmtime run --tcplisten 127.0.0.1:9000 --env 'LISTEN_FDS=1' target/wasm32-wasi/debug/examples/tcp_listenfd_server.wasm
 
-use mio_wasi::event::Event;
-use mio_wasi::net::{TcpListener, TcpStream};
-use mio_wasi::{Events, Interest, Poll, Registry, Token};
+use mio::event::Event;
+use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Interest, Poll, Registry, Token};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::str::from_utf8;

@@ -27,6 +27,10 @@ include       = [
   "examples/**/*.rs",
 ]
 
+[lib]
+name = "mio"
+path = "src/lib.rs"
+
 # For documentation of features see the `mio::features` module.
 [features]
 # By default Mio only provides a shell implementation.
