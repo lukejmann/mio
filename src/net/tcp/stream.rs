@@ -1,6 +1,6 @@
 use std::fmt;
 use std::io::{self, IoSlice, IoSliceMut, Read, Write};
-#[cfg(not(feature = "wasmedge"))]
+#[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
 use std::net;
 use std::net::{Shutdown, SocketAddr};
 #[cfg(unix)]
@@ -48,9 +48,9 @@ use crate::{event, Interest, Registry, Token};
 /// # }
 /// ```
 pub struct TcpStream {
-    #[cfg(not(feature = "wasmedge"))]
+    #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
     inner: IoSource<net::TcpStream>,
-    #[cfg(feature = "wasmedge")]
+    #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     inner: IoSource<wasmedge_wasi_socket::TcpStream>,
 }
 
@@ -118,7 +118,7 @@ impl TcpStream {
     /// The TCP stream here will not have `connect` called on it, so it
     /// should already be connected via some other means (be it manually, or
     /// the standard library).
-    #[cfg(not(feature = "wasmedge"))]
+    #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
     pub fn from_std(stream: net::TcpStream) -> TcpStream {
         TcpStream {
             inner: IoSource::new(stream),
@@ -126,7 +126,7 @@ impl TcpStream {
     }
 
     /// from std wasi
-    #[cfg(feature = "wasmedge")]
+    #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     pub fn from_std(stream: wasmedge_wasi_socket::TcpStream) -> TcpStream {
         TcpStream {
             inner: IoSource::new(stream),
@@ -166,9 +166,9 @@ impl TcpStream {
     /// by receiving an (writable) event. Trying to set `nodelay` on an
     /// unconnected `TcpStream` is unspecified behavior.
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.set_nodelay(nodelay);
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(())
     }
 
@@ -184,9 +184,9 @@ impl TcpStream {
     /// by receiving an (writable) event. Trying to get `nodelay` on an
     /// unconnected `TcpStream` is unspecified behavior.
     pub fn nodelay(&self) -> io::Result<bool> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.nodelay();
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(true)
     }
 
@@ -201,9 +201,9 @@ impl TcpStream {
     /// by receiving an (writable) event. Trying to set `ttl` on an
     /// unconnected `TcpStream` is unspecified behavior.
     pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.set_ttl(ttl);
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(())
     }
 
@@ -219,9 +219,9 @@ impl TcpStream {
     ///
     /// [link]: #method.set_ttl
     pub fn ttl(&self) -> io::Result<u32> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.ttl();
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(0)
     }
 
@@ -231,9 +231,9 @@ impl TcpStream {
     /// the field in the process. This can be useful for checking errors between
     /// calls.
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.take_error();
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(None)
     }
 
@@ -244,9 +244,9 @@ impl TcpStream {
     /// Successive calls return the same data. This is accomplished by passing
     /// `MSG_PEEK` as a flag to the underlying recv system call.
     pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.peek(buf);
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(0)
     }
 

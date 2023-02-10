@@ -2,13 +2,13 @@ use crate::io_source::IoSource;
 use crate::net::TcpStream;
 #[cfg(unix)]
 use crate::sys::tcp::set_reuseaddr;
-#[cfg(not(feature = "wasmedge"))]
+#[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
 use crate::sys::{
     self,
     tcp::{bind, listen, new_for_addr},
 };
 use crate::{event, Interest, Registry, Token};
-#[cfg(not(feature = "wasmedge"))]
+#[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
 use std::net;
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -45,9 +45,9 @@ use std::{fmt, io};
 /// # }
 /// ```
 pub struct TcpListener {
-    #[cfg(not(feature = "wasmedge"))]
+    #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
     inner: IoSource<net::TcpListener>,
-    #[cfg(feature = "wasmedge")]
+    #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     inner: IoSource<wasmedge_wasi_socket::TcpListener>,
 }
 
@@ -62,7 +62,7 @@ impl TcpListener {
     /// 3. Bind the socket to the specified address.
     /// 4. Calls `listen` on the socket to prepare it to receive new connections.
     // #[cfg(not(target_os = "wasi"))]
-    #[cfg(not(feature = "wasmedge"))]
+    #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
     pub fn bind(addr: SocketAddr) -> io::Result<TcpListener> {
         let socket = new_for_addr(addr)?;
         #[cfg(unix)]
@@ -86,7 +86,7 @@ impl TcpListener {
     }
 
     /// bind wasi
-    #[cfg(feature = "wasmedge")]
+    #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     pub fn bind(addr: SocketAddr) -> io::Result<TcpListener> {
         let inner = wasmedge_wasi_socket::TcpListener::bind(addr, true)?;
         Ok(TcpListener {
@@ -100,7 +100,7 @@ impl TcpListener {
     /// standard library in the Mio equivalent. The conversion assumes nothing
     /// about the underlying listener; ; it is left up to the user to set it
     /// in non-blocking mode.
-    #[cfg(not(feature = "wasmedge"))]
+    #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
     pub fn from_std(listener: net::TcpListener) -> TcpListener {
         TcpListener {
             inner: IoSource::new(listener),
@@ -108,7 +108,7 @@ impl TcpListener {
     }
 
     /// fromstd wasi
-    #[cfg(feature = "wasmedge")]
+    #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     pub fn from_std(listener: wasmedge_wasi_socket::TcpListener) -> TcpListener {
         TcpListener {
             inner: IoSource::new(listener),
@@ -124,11 +124,11 @@ impl TcpListener {
     /// If an accepted stream is returned, the remote address of the peer is
     /// returned along with it.
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.do_io(|inner| {
             sys::tcp::accept(inner).map(|(stream, addr)| (TcpStream::from_std(stream), addr))
         });
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         return self.inner.do_io(|inner| {
             self.inner
                 .accept(true)
@@ -137,13 +137,13 @@ impl TcpListener {
     }
 
     /// Returns the local socket address of this listener.
-    #[cfg(not(feature = "wasmedge"))]
+    #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         return self.inner.local_addr();
     }
 
     /// Returns the local socket address of this listener.
-    #[cfg(feature = "wasmedge")]
+    #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         return self.inner.local_addr();
     }
@@ -153,9 +153,9 @@ impl TcpListener {
     /// This value sets the time-to-live field that is used in every packet sent
     /// from this socket.
     pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.set_ttl(ttl);
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(())
     }
 
@@ -165,9 +165,9 @@ impl TcpListener {
     ///
     /// [link]: #method.set_ttl
     pub fn ttl(&self) -> io::Result<u32> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.ttl();
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(0)
     }
 
@@ -177,9 +177,9 @@ impl TcpListener {
     /// the field in the process. This can be useful for checking errors between
     /// calls.
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        #[cfg(not(feature = "wasmedge"))]
+        #[cfg(any(not(target_os = "wasi"), not(feature = "wasmedge")))]
         return self.inner.take_error();
-        #[cfg(feature = "wasmedge")]
+        #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         Ok(None)
     }
 }
