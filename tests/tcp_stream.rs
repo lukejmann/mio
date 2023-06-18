@@ -296,7 +296,9 @@ fn shutdown_read() {
         target_os = "ios",
         target_os = "macos",
         target_os = "netbsd",
-        target_os = "openbsd"
+        target_os = "openbsd",
+        target_os = "tvos",
+        target_os = "watchos",
     ))]
     {
         let mut buf = [0; 20];
@@ -384,7 +386,9 @@ fn shutdown_both() {
         target_os = "ios",
         target_os = "macos",
         target_os = "netbsd",
-        target_os = "openbsd"
+        target_os = "openbsd",
+        target_os = "tvos",
+        target_os = "watchos",
     ))]
     {
         let mut buf = [0; 20];
@@ -792,4 +796,53 @@ fn hup_event_on_disconnect() {
         &mut events,
         vec![ExpectEvent::new(Token(1), Interest::READABLE)],
     );
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn priority_event_on_oob_data() {
+    let (mut poll, mut events) = init_with_poll();
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+    let listener = std::net::TcpListener::bind(addr).unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let mut client = TcpStream::connect(addr).unwrap();
+    poll.registry()
+        .register(
+            &mut client,
+            Token(0),
+            Interest::READABLE | Interest::PRIORITY,
+        )
+        .unwrap();
+
+    let (stream, _) = listener.accept().unwrap();
+
+    // Sending out of bound data should trigger priority event.
+    send_oob_data(&stream, DATA1).unwrap();
+    expect_events(
+        &mut poll,
+        &mut events,
+        vec![ExpectEvent::new(
+            Token(0),
+            Readiness::READABLE | Readiness::PRIORITY,
+        )],
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn send_oob_data<S: AsRawFd>(stream: &S, data: &[u8]) -> io::Result<usize> {
+    unsafe {
+        let res = libc::send(
+            stream.as_raw_fd(),
+            data.as_ptr().cast(),
+            data.len(),
+            libc::MSG_OOB,
+        );
+        if res == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(res as usize)
+        }
+    }
 }

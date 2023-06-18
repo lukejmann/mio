@@ -29,7 +29,9 @@ fn fmt_debug() {
         target_os = "dragonfly",
         target_os = "freebsd",
         target_os = "ios",
-        target_os = "macos"
+        target_os = "macos",
+        target_os = "tvos",
+        target_os = "watchos",
     ))]
     {
         assert_eq!(format!("{:?}", Interest::AIO), "AIO");
