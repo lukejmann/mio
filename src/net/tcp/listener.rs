@@ -130,7 +130,7 @@ impl TcpListener {
         });
         #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
         return self.inner.do_io(|inner| {
-            self.inner
+            inner
                 .accept(true)
                 .map(|(stream, addr)| (TcpStream::from_std(stream), addr))
         });
