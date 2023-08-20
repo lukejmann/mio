@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::io;
 #[cfg(feature = "net")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -121,7 +121,7 @@ impl Selector {
 
     #[cfg(feature = "net")]
     pub fn register(&self, fd: wasi::Fd, token: Token, interests: Interest) -> io::Result<()> {
-        // println!("fd: {}", fd);
+        log::trace!("wasmedge register fd: {}", fd);
         let mut subscriptions = self.subscriptions.lock().unwrap();
         if interests.is_writable() {
             let subscription = wasi::Subscription {
@@ -207,8 +207,10 @@ fn timeout_subscription(timeout: Duration) -> wasi::Subscription {
                 clock: wasi::SubscriptionClock {
                     id: wasi::CLOCKID_MONOTONIC,
                     // Timestamp is in nanoseconds.
-                    timeout: min(wasi::Timestamp::MAX as u128, timeout.as_nanos())
-                        as wasi::Timestamp,
+                    timeout: max(
+                        min(wasi::Timestamp::MAX as u128, timeout.as_nanos()) as wasi::Timestamp,
+                        10,
+                    ),
                     // Give the implementation another millisecond to coalesce
                     // events.
                     precision: Duration::from_millis(1).as_nanos() as wasi::Timestamp,
