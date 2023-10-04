@@ -11,8 +11,30 @@ use crate::{Interest, Token};
 use wasmedge_wasi_socket::wasi_poll as wasi;
 
 cfg_net! {
-    pub mod tcp {
+
+pub mod tcp {
+    use std::io;
+    use std::net::SocketAddr;
+    use wasmedge_wasi_socket::socket::{self, Socket};
+
+    pub(crate) fn new_for_addr(address: SocketAddr) -> io::Result<Socket> {
+        let domain = match address {
+            SocketAddr::V4(_) => socket::AddressFamily::Inet4,
+            SocketAddr::V6(_) => socket::AddressFamily::Inet6,
+        };
+
+        let s = socket::Socket::new(domain, socket::SocketType::Stream)?;
+        s.set_nonblocking(true)?;
+        Ok(s)
     }
+
+    pub(crate) fn connect(socket: &Socket, addr: SocketAddr) -> io::Result<()> {
+        match socket.connect(&addr) {
+            Err(err) if err.raw_os_error() != Some(libc::EINPROGRESS) => Err(err),
+            _ => Ok(()),
+        }
+    }
+}
 }
 
 /// Unique id for use as `SelectorId`.

@@ -13,6 +13,9 @@ use std::os::windows::io::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket}
 use crate::io_source::IoSource;
 #[cfg(not(target_os = "wasi"))]
 use crate::sys::tcp::{connect, new_for_addr};
+#[cfg(target_os = "wasi")]
+use crate::sys::tcp::{connect, new_for_addr};
+
 use crate::{event, Interest, Registry, Token};
 
 /// A non-blocking TCP stream between a local socket and a remote socket.
@@ -99,11 +102,10 @@ impl TcpStream {
     /// connect wasi
     #[cfg(all(target_os = "wasi", feature = "wasmedge"))]
     pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
-        let inner = wasmedge_wasi_socket::TcpStream::connect(addr)?;
-        inner.set_nonblocking(true)?;
-        Ok(TcpStream {
-            inner: IoSource::new(inner),
-        })
+        let socket = new_for_addr(addr)?;
+        connect(&socket, addr)?;
+        let stream = unsafe { wasmedge_wasi_socket::TcpStream::from_raw_fd(socket.into_raw_fd()) };
+        Ok(TcpStream::from_std(stream))
     }
 
     /// Creates a new `TcpStream` from a standard `net::TcpStream`.
