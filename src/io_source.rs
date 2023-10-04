@@ -202,7 +202,7 @@ where
     }
 }
 
-#[cfg(target_os = "wasi")]
+#[cfg(all(target_os = "wasi", not(feature = "wasmedge")))]
 impl<T> event::Source for IoSource<T>
 where
     T: AsRawFd,
@@ -237,6 +237,49 @@ where
         #[cfg(debug_assertions)]
         self.selector_id.remove_association(registry)?;
         registry.selector().deregister(self.inner.as_raw_fd() as _)
+    }
+}
+
+#[cfg(all(target_os = "wasi", feature = "wasmedge"))]
+impl<T> event::Source for IoSource<T>
+where
+    T: AsRawFd,
+{
+    fn register(
+        &mut self,
+        registry: &Registry,
+        token: Token,
+        interests: Interest,
+    ) -> io::Result<()> {
+        #[cfg(debug_assertions)]
+        self.selector_id.associate(registry)?;
+        // registry
+        //     .selector()
+        //     .register(self.inner.as_raw_fd() as _, token, interests)
+        self.state
+            .register(registry, token, interests, self.inner.as_raw_fd())
+    }
+
+    fn reregister(
+        &mut self,
+        registry: &Registry,
+        token: Token,
+        interests: Interest,
+    ) -> io::Result<()> {
+        #[cfg(debug_assertions)]
+        self.selector_id.check_association(registry)?;
+        // registry
+        //     .selector()
+        //     .reregister(self.inner.as_raw_fd() as _, token, interests)
+        self.state
+            .reregister(registry, token, interests, self.inner.as_raw_fd())
+    }
+
+    fn deregister(&mut self, registry: &Registry) -> io::Result<()> {
+        #[cfg(debug_assertions)]
+        self.selector_id.remove_association(registry)?;
+        // registry.selector().deregister(self.inner.as_raw_fd() as _)
+        self.state.deregister(registry, self.inner.as_raw_fd())
     }
 }
 
