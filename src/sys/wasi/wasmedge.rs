@@ -1,18 +1,44 @@
 #![allow(dead_code)]
-use std::cmp::min;
+use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::io;
+use std::os::fd::RawFd;
+use std::sync::atomic::AtomicBool;
 #[cfg(feature = "net")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::Registry;
 #[cfg(feature = "net")]
 use crate::{Interest, Token};
 use wasmedge_wasi_socket::wasi_poll as wasi;
 
 cfg_net! {
-    pub mod tcp {
+
+pub mod tcp {
+    use std::io;
+    use std::net::SocketAddr;
+    use wasmedge_wasi_socket::socket::{self, Socket};
+
+    pub(crate) fn new_for_addr(address: SocketAddr) -> io::Result<Socket> {
+        let domain = match address {
+            SocketAddr::V4(_) => socket::AddressFamily::Inet4,
+            SocketAddr::V6(_) => socket::AddressFamily::Inet6,
+        };
+
+        let s = socket::Socket::new(domain, socket::SocketType::Stream)?;
+        s.set_nonblocking(true)?;
+        Ok(s)
     }
+
+    pub(crate) fn connect(socket: &Socket, addr: SocketAddr) -> io::Result<()> {
+        match socket.connect(&addr) {
+            Err(err) if err.raw_os_error() != Some(libc::EINPROGRESS) => Err(err),
+            _ => Ok(()),
+        }
+    }
+}
 }
 
 /// Unique id for use as `SelectorId`.
@@ -41,15 +67,54 @@ pub struct Selector {
     #[cfg(feature = "net")]
     id: usize,
     /// Subscriptions (reads events) we're interested in.
-    subscriptions: Arc<Mutex<Vec<wasi::Subscription>>>,
+    subscriptions:
+        Arc<Mutex<HashMap<wasi::Fd, (Token, Interest, Arc<AtomicBool>, Arc<AtomicBool>)>>>,
 }
 
 impl Selector {
+    fn subscriptions(&self) -> Vec<wasi::Subscription> {
+        let subscriptions = self.subscriptions.lock().unwrap();
+        let mut subs = Vec::with_capacity(subscriptions.len() * 2);
+        for (fd, (_token, insterest, read_state, write_state)) in subscriptions.iter() {
+            if insterest.is_readable() && read_state.load(Ordering::Acquire) {
+                let s = wasi::Subscription {
+                    userdata: *fd as wasi::Userdata,
+                    u: wasi::SubscriptionU {
+                        tag: wasi::EVENTTYPE_FD_READ,
+                        u: wasi::SubscriptionUU {
+                            fd_read: wasi::SubscriptionFdReadwrite {
+                                file_descriptor: *fd,
+                            },
+                        },
+                    },
+                };
+                subs.push(s);
+            }
+
+            if insterest.is_writable() && write_state.load(Ordering::Acquire) {
+                let s = wasi::Subscription {
+                    userdata: *fd as wasi::Userdata,
+                    u: wasi::SubscriptionU {
+                        tag: wasi::EVENTTYPE_FD_WRITE,
+                        u: wasi::SubscriptionUU {
+                            fd_read: wasi::SubscriptionFdReadwrite {
+                                file_descriptor: *fd,
+                            },
+                        },
+                    },
+                };
+                subs.push(s);
+            }
+        }
+
+        subs
+    }
+
     pub fn new() -> io::Result<Selector> {
         Ok(Selector {
             #[cfg(feature = "net")]
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-            subscriptions: Arc::new(Mutex::new(Vec::new())),
+            subscriptions: Default::default(),
         })
     }
 
@@ -68,7 +133,7 @@ impl Selector {
     pub fn select(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         events.clear();
 
-        let mut subscriptions = self.subscriptions.lock().unwrap();
+        let mut subscriptions = self.subscriptions();
 
         // If we want to a use a timeout in the `wasi_poll_oneoff()` function
         // we need another subscription to the list.
@@ -94,21 +159,53 @@ impl Selector {
             );
         }
 
-        drop(subscriptions); // Unlock.
-
         match res {
             Ok(n_events) => {
                 // Safety: `poll_oneoff` initialises the `events` for us.
                 unsafe { events.set_len(n_events) };
 
+                let subscriptions = self.subscriptions.lock().unwrap();
+
+                let mut timeout_index = None;
+
+                for (i, ev) in events.iter_mut().enumerate() {
+                    let fd = ev.userdata as wasi::Fd;
+
+                    if is_timeout_event(ev) {
+                        timeout_index = Some(i);
+                        continue;
+                    }
+
+                    if ev.error != 0 {
+                        let e = io_err(ev.error);
+                        return Err(e);
+                    }
+
+                    if let Some((token, _interest, read_state, write_state)) =
+                        subscriptions.get(&fd)
+                    {
+                        if ev.type_ == wasi::EVENTTYPE_FD_READ {
+                            ev.userdata = token.0 as wasi::Userdata;
+                            read_state.store(false, Ordering::Release);
+                            continue;
+                        }
+
+                        if ev.type_ == wasi::EVENTTYPE_FD_WRITE {
+                            ev.userdata = token.0 as wasi::Userdata;
+                            write_state.store(false, Ordering::Release);
+                            continue;
+                        }
+                    }
+                }
+
                 // Remove the timeout event.
                 if timeout.is_some() {
-                    if let Some(index) = events.iter().position(is_timeout_event) {
+                    if let Some(index) = timeout_index {
                         events.swap_remove(index);
                     }
                 }
 
-                check_errors(&events)
+                Ok(())
             }
             Err(err) if err.kind() == io::ErrorKind::InvalidInput && length == 0 => {
                 // return Ok when there is no subscriptions
@@ -120,70 +217,38 @@ impl Selector {
     }
 
     #[cfg(feature = "net")]
-    pub fn register(&self, fd: wasi::Fd, token: Token, interests: Interest) -> io::Result<()> {
-        // println!("fd: {}", fd);
+    pub fn register(
+        &self,
+        fd: wasi::Fd,
+        token: Token,
+        interests: Interest,
+        (read_state, write_state): (Arc<AtomicBool>, Arc<AtomicBool>),
+    ) -> io::Result<()> {
         let mut subscriptions = self.subscriptions.lock().unwrap();
-        if interests.is_writable() {
-            let subscription = wasi::Subscription {
-                userdata: token.0 as wasi::Userdata,
-                u: wasi::SubscriptionU {
-                    tag: wasi::EVENTTYPE_FD_WRITE,
-                    u: wasi::SubscriptionUU {
-                        fd_write: wasi::SubscriptionFdReadwrite {
-                            file_descriptor: fd,
-                        },
-                    },
-                },
-            };
-            subscriptions.push(subscription);
-        }
-
-        if interests.is_readable() {
-            let subscription = wasi::Subscription {
-                userdata: token.0 as wasi::Userdata,
-                u: wasi::SubscriptionU {
-                    tag: wasi::EVENTTYPE_FD_READ,
-                    u: wasi::SubscriptionUU {
-                        fd_read: wasi::SubscriptionFdReadwrite {
-                            file_descriptor: fd,
-                        },
-                    },
-                },
-            };
-            subscriptions.push(subscription);
-        }
+        subscriptions.insert(fd, (token, interests, read_state, write_state));
 
         Ok(())
     }
 
     #[cfg(feature = "net")]
-    pub fn reregister(&self, fd: wasi::Fd, token: Token, interests: Interest) -> io::Result<()> {
+    pub fn reregister(
+        &self,
+        fd: wasi::Fd,
+        token: Token,
+        interests: Interest,
+        (read_state, write_state): (Arc<AtomicBool>, Arc<AtomicBool>),
+    ) -> io::Result<()> {
         self.deregister(fd)
-            .and_then(|()| self.register(fd, token, interests))
+            .and_then(|()| self.register(fd, token, interests, (read_state, write_state)))
     }
 
     #[cfg(feature = "net")]
     pub fn deregister(&self, fd: wasi::Fd) -> io::Result<()> {
-        let mut subscriptions = self.subscriptions.lock().unwrap();
-
-        let predicate = |subscription: &wasi::Subscription| {
-            // Safety: `subscription.u.tag` defines the type of the union in
-            // `subscription.u.u`.
-            match subscription.u.tag {
-                t if t == wasi::EVENTTYPE_FD_WRITE => unsafe {
-                    subscription.u.u.fd_write.file_descriptor == fd
-                },
-                t if t == wasi::EVENTTYPE_FD_READ => unsafe {
-                    subscription.u.u.fd_read.file_descriptor == fd
-                },
-                _ => false,
-            }
-        };
-
         let mut ret = Err(io::ErrorKind::NotFound.into());
 
-        while let Some(index) = subscriptions.iter().position(predicate) {
-            subscriptions.swap_remove(index);
+        let s = self.subscriptions.lock().unwrap().remove(&fd);
+
+        if s.is_some() {
             ret = Ok(())
         }
 
@@ -207,8 +272,10 @@ fn timeout_subscription(timeout: Duration) -> wasi::Subscription {
                 clock: wasi::SubscriptionClock {
                     id: wasi::CLOCKID_MONOTONIC,
                     // Timestamp is in nanoseconds.
-                    timeout: min(wasi::Timestamp::MAX as u128, timeout.as_nanos())
-                        as wasi::Timestamp,
+                    timeout: max(
+                        min(wasi::Timestamp::MAX as u128, timeout.as_nanos()) as wasi::Timestamp,
+                        10,
+                    ),
                     // Give the implementation another millisecond to coalesce
                     // events.
                     precision: Duration::from_millis(1).as_nanos() as wasi::Timestamp,
@@ -338,21 +405,77 @@ pub mod event {
 
 cfg_os_poll! {
     cfg_io_source! {
-        pub struct IoSourceState;
 
-        impl IoSourceState {
-            pub fn new() -> IoSourceState {
-                IoSourceState
+pub struct IoSourceState {
+    readstate: Arc<AtomicBool>,
+    writestate: Arc<AtomicBool>,
+}
+
+impl IoSourceState {
+    pub fn new() -> IoSourceState {
+        IoSourceState {
+            readstate: Arc::new(AtomicBool::new(true)),
+            writestate: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    pub fn do_io<T, F, R>(&self, f: F, io: &T) -> io::Result<R>
+    where
+        F: FnOnce(&T) -> io::Result<R>,
+    {
+        // We don't hold state, so we can just call the function and
+        // return.
+        let r = f(io);
+        match &r {
+            Ok(_) => {
+                self.readstate.store(true, Ordering::Release);
+                self.writestate.store(true, Ordering::Release);
             }
-
-            pub fn do_io<T, F, R>(&self, f: F, io: &T) -> io::Result<R>
-            where
-                F: FnOnce(&T) -> io::Result<R>,
-            {
-                // We don't hold state, so we can just call the function and
-                // return.
-                f(io)
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    self.readstate.store(true, Ordering::Release);
+                    self.writestate.store(true, Ordering::Release);
+                }
             }
         }
+
+        r
+    }
+
+    pub fn register(
+        &mut self,
+        registry: &Registry,
+        token: Token,
+        interests: Interest,
+        fd: RawFd,
+    ) -> io::Result<()> {
+        registry.selector().register(
+            fd as _,
+            token,
+            interests,
+            (self.readstate.clone(), self.writestate.clone()),
+        )
+    }
+
+    pub fn reregister(
+        &mut self,
+        registry: &Registry,
+        token: Token,
+        interests: Interest,
+        fd: RawFd,
+    ) -> io::Result<()> {
+        registry.selector().reregister(
+            fd as _,
+            token,
+            interests,
+            (self.readstate.clone(), self.writestate.clone()),
+        )
+    }
+
+    pub fn deregister(&mut self, registry: &Registry, fd: RawFd) -> io::Result<()> {
+        registry.selector().deregister(fd as _)
+    }
+}
+
     }
 }
