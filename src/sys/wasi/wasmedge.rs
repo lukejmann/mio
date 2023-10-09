@@ -68,7 +68,7 @@ pub struct Selector {
     id: usize,
     /// Subscriptions (reads events) we're interested in.
     subscriptions:
-        Arc<Mutex<HashMap<wasi::Fd, (Token, Interest, Arc<AtomicBool>, Arc<AtomicBool>)>>>,
+        Arc<Mutex<HashMap<wasi::Fd, (Token, Interest, Arc<AtomicBool>, Arc<AtomicUsize>)>>>,
 }
 
 impl Selector {
@@ -91,7 +91,7 @@ impl Selector {
                 subs.push(s);
             }
 
-            if insterest.is_writable() && write_state.load(Ordering::Acquire) {
+            if insterest.is_writable() && write_state.load(Ordering::Acquire) > 0 {
                 let s = wasi::Subscription {
                     userdata: *fd as wasi::Userdata,
                     u: wasi::SubscriptionU {
@@ -192,7 +192,7 @@ impl Selector {
 
                         if ev.type_ == wasi::EVENTTYPE_FD_WRITE {
                             ev.userdata = token.0 as wasi::Userdata;
-                            write_state.store(false, Ordering::Release);
+                            write_state.fetch_sub(1, Ordering::Release);
                             continue;
                         }
                     }
@@ -222,7 +222,7 @@ impl Selector {
         fd: wasi::Fd,
         token: Token,
         interests: Interest,
-        (read_state, write_state): (Arc<AtomicBool>, Arc<AtomicBool>),
+        (read_state, write_state): (Arc<AtomicBool>, Arc<AtomicUsize>),
     ) -> io::Result<()> {
         let mut subscriptions = self.subscriptions.lock().unwrap();
         subscriptions.insert(fd, (token, interests, read_state, write_state));
@@ -236,7 +236,7 @@ impl Selector {
         fd: wasi::Fd,
         token: Token,
         interests: Interest,
-        (read_state, write_state): (Arc<AtomicBool>, Arc<AtomicBool>),
+        (read_state, write_state): (Arc<AtomicBool>, Arc<AtomicUsize>),
     ) -> io::Result<()> {
         self.deregister(fd)
             .and_then(|()| self.register(fd, token, interests, (read_state, write_state)))
@@ -408,14 +408,14 @@ cfg_os_poll! {
 
 pub struct IoSourceState {
     readstate: Arc<AtomicBool>,
-    writestate: Arc<AtomicBool>,
+    writestate: Arc<AtomicUsize>,
 }
 
 impl IoSourceState {
     pub fn new() -> IoSourceState {
         IoSourceState {
             readstate: Arc::new(AtomicBool::new(true)),
-            writestate: Arc::new(AtomicBool::new(true)),
+            writestate: Arc::new(AtomicUsize::new(2)),
         }
     }
 
@@ -429,12 +429,12 @@ impl IoSourceState {
         match &r {
             Ok(_) => {
                 self.readstate.store(true, Ordering::Release);
-                self.writestate.store(true, Ordering::Release);
+                self.writestate.store(2, Ordering::Release);
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
                     self.readstate.store(true, Ordering::Release);
-                    self.writestate.store(true, Ordering::Release);
+                    self.writestate.store(2, Ordering::Release);
                 }
             }
         }
